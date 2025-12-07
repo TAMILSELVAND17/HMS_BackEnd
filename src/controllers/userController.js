@@ -6,6 +6,13 @@ const sendMailToUser = require("../utils/email");
 
 const JWT_SECRET = process.env.JWT_SECRET || "SUPER_SECRET_KEY";
 
+// Frontend URL fallback when env is not set (prevents 'undefined' in emails)
+const FRONTEND_URL = (process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/$/, "");
+// Hours for password-setup link expiry (default 24 hours)
+const PASSWORD_SETUP_EXPIRES_HOURS = parseInt(process.env.PASSWORD_SETUP_EXPIRES_HOURS, 10) || 24;
+// Hours for forgot-password link expiry (default 1 hour)
+const FORGOT_PASSWORD_EXPIRES_HOURS = parseInt(process.env.FORGOT_PASSWORD_EXPIRES_HOURS, 10) || 1;
+
 // ==================================================
 // REGISTER USER (Send password setup link)
 // ==================================================
@@ -35,9 +42,11 @@ const registerUser = async (req, res) => {
       passwordSet: false
     });
 
-    const token = jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: "24h" });
+    const token = jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: `${PASSWORD_SETUP_EXPIRES_HOURS}h` });
 
-    const link = `${process.env.FRONTEND_URL}/set-password?token=${token}`;
+    const link = `${FRONTEND_URL}/set-password?token=${token}`;
+    //  const link = `https://hostel-front.vercel.app/set-password?token=${token}`;
+    const expiryDate = new Date(Date.now() + PASSWORD_SETUP_EXPIRES_HOURS * 60 * 60 * 1000).toUTCString();
 
     await sendMailToUser(
       user.email,
@@ -46,7 +55,7 @@ const registerUser = async (req, res) => {
       <h2>Welcome to HMS!</h2>
       <p>Click the link below to set your password:</p>
       <a href="${link}" style="color:blue;">${link}</a>
-      <p>This link is valid for 24 hours.</p>
+      <p>This link is valid for ${PASSWORD_SETUP_EXPIRES_HOURS} hour(s) (expires: ${expiryDate}).</p>
       `
     );
 
@@ -95,9 +104,10 @@ const bulkUploadUsers = async (req, res) => {
 
       createdUsers.push(user);
 
-      const token = jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: "24h" });
+      const token = jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: `${PASSWORD_SETUP_EXPIRES_HOURS}h` });
 
-      const link = `${process.env.FRONTEND_URL}/set-password?token=${token}`;
+      const link = `${FRONTEND_URL}/set-password?token=${token}`;
+      const expiryDate = new Date(Date.now() + PASSWORD_SETUP_EXPIRES_HOURS * 60 * 60 * 1000).toUTCString();
 
       await sendMailToUser(
         user.email,
@@ -106,6 +116,7 @@ const bulkUploadUsers = async (req, res) => {
         <h2>Welcome to HMS!</h2>
         <p>Click the link below to set your password:</p>
         <a href="${link}">${link}</a>
+        <p>This link is valid for ${PASSWORD_SETUP_EXPIRES_HOURS} hour(s) (expires: ${expiryDate}).</p>
         `
       );
     }
@@ -211,9 +222,10 @@ const forgotPassword = async (req, res) => {
     if (!user)
       return res.status(404).json({ success: false, message: "Email not found" });
 
-    const token = jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: "1h" });
+    const token = jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: `${FORGOT_PASSWORD_EXPIRES_HOURS}h` });
 
-    const link = `${process.env.FRONTEND_URL}/reset-password?token=${token}`;
+    const link = `${FRONTEND_URL}/reset-password?token=${token}`;
+    const expiryDate = new Date(Date.now() + FORGOT_PASSWORD_EXPIRES_HOURS * 60 * 60 * 1000).toUTCString();
 
     await sendMailToUser(
       user.email,
@@ -222,6 +234,7 @@ const forgotPassword = async (req, res) => {
       <h3>Password Reset</h3>
       <p>Click below to reset:</p>
       <a href="${link}">${link}</a>
+      <p>This link is valid for ${FORGOT_PASSWORD_EXPIRES_HOURS} hour(s) (expires: ${expiryDate}).</p>
       `
     );
 
@@ -286,6 +299,68 @@ const getUserById = async (req, res) => {
   res.json({ success: true, user });
 };
 
+
+const verifyToken = async (req, res) => {
+  try {
+    const { token } = req.query;
+
+    if (!token) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Token is required" 
+      });
+    }
+
+    // Verify token
+    const decoded = jwt.verify(token, JWT_SECRET);
+    
+    // Find user
+    const user = await User.findById(decoded.id);
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "User not found" 
+      });
+    }
+
+    // Check if password is already set
+    if (user.passwordSet) {
+      return res.json({ 
+        success: false, 
+        message: "Password has already been set",
+        email: user.email 
+      });
+    }
+
+    res.json({ 
+      success: true, 
+      message: "Token is valid",
+      email: user.email,
+      expiresIn: decoded.exp
+    });
+    
+  } catch (err) {
+    if (err.name === 'TokenExpiredError') {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Token has expired. Please request a new password setup link." 
+      });
+    }
+    
+    if (err.name === 'JsonWebTokenError') {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Invalid token" 
+      });
+    }
+    
+    res.status(400).json({ 
+      success: false, 
+      message: err.message 
+    });
+  }
+};
+
 // EXPORTS
 module.exports = {
   registerUser,
@@ -298,4 +373,5 @@ module.exports = {
   deleteUser,
   getAllUsers,
   getUserById,
+  verifyToken
 };

@@ -11,7 +11,7 @@ const {
   getAllUsers,
   getUserById,
   updateUser,
-  bulkUploadUsers
+  bulkUploadUsers,verifyToken
 } = require("../controllers/userController");
 
 const { bulkUpload } = require("../middlewares/multerConfig");
@@ -24,6 +24,8 @@ router.post("/set-password", setPassword);       // Set password from email link
 router.post("/login", loginUser);                // Login
 router.post("/forgot-password", forgotPassword); // Forgot password
 router.post("/reset-password", resetPassword);   // Reset password
+
+router.get('/verify-token',verifyToken);
 
 // ================================
 // USER CRUD ROUTES
